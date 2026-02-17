@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="no">
+<head>
+    <meta charset="UTF-8">
+    <title>Zombie Base Builder - Sideview</title>
+    <style>
+        body { margin: 0; background: #000; color: white; font-family: sans-serif; overflow: hidden; }
+        canvas { display: block; background: #1a1a2e; }
+        #ui {
+            position: absolute; top: 10px; left: 10px; padding: 10px;
+            background: rgba(0,0,0,0.7); border-radius: 5px; pointer-events: none;
+        }
+        #build-menu {
+            position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+            display: flex; gap: 10px; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 10px;
+        }
+        .key-hint { color: #aaa; font-size: 0.8em; }
+        .active { border: 2px solid #00f0ff; background: rgba(0, 240, 255, 0.2); }
+        .slot { padding: 5px 10px; border: 1px solid #555; text-align: center; }
+    </style>
+</head>
+<body>
+
+<div id="ui">
+    <div id="time-display">Tid: Dag 1 - 03:00</div>
+    <div>Materialer: <span id="mat-count">20</span></div>
+    <div>Base Helse: <span id="base-hp">500</span></div>
+    <div id="phase-msg" style="color: #4ade80; font-weight: bold;">SAMLE MATERIALER!</div>
+</div>
+
+<div id="build-menu">
+    <div class="slot" id="slot1">1: Vegg (5)</div>
+    <div class="slot" id="slot2">2: Gulv (3)</div>
+    <div class="slot" id="slot3">3: Trapp (4)</div>
+    <div class="slot" id="slot4">4: Turret (15)</div>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+canvas.width = window.innerWidth;
+canvas.height = window.innerHeight;
+
+// --- KONFIGURASJON ---
+const WORLD_WIDTH = 4000;
+const GROUND_Y = canvas.height - 100;
+const DAY_DURATION = 180; // 3 minutter
+const NIGHT_DURATION = 90; // 1,5 minutter
+
+let state = {
+    day: 1,
+    isDay: true,
+    timeLeft: DAY_DURATION,
+    materials: 50,
+    buildMode: 1,
+    cameraX: 0
+};
+
+const keys = {};
+let player = {
+    x: WORLD_WIDTH / 2, y: GROUND_Y - 50,
+    w: 30, h: 50, vx: 0, vy: 0,
+    speed: 5, jumpPower: 12,
+    grounded: false, onWall: false,
+    lastWallSide: 0 // -1 for venstre, 1 for høyre
+};
+
+let base = { x: WORLD_WIDTH / 2 - 50, y: GROUND_Y - 100, w: 100, h: 100, hp: 500 };
+let structures = [];
+let resources = [];
+let zombies = [];
+let projectiles = [];
+let turrets = [];
+
+// Input
+window.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if(e.key >= '1' && e.key <= '4') state.buildMode = parseInt(e.key);
+});
+window.addEventListener('keyup', e => keys[e.code] = false);
+
+window.addEventListener('mousedown', e => {
+    const worldX = e.clientX + state.cameraX;
+    const worldY = e.clientY;
+    buildStructure(worldX, worldY);
+});
+
+function buildStructure(x, y) {
+    let cost = [0, 5, 3, 4, 15][state.buildMode];
+    if (state.materials < cost) return;
+
+    // Snapping til grid
+    let gx = Math.floor(x / 40) * 40;
+    let gy = Math.floor(y / 40) * 40;
+
+    let type = ["", "wall", "floor", "stair", "turret"][state.buildMode];
+    
+    structures.push({ x: gx, y: gy, w: 40, h: 40, type: type, hp: 100 });
+    if(type === 'turret') turrets.push({x: gx + 20, y: gy + 20, lastShot: 0});
+    
+    state.materials -= cost;
+    updateUI();
+}
+
+function updateUI() {
+    document.getElementById('mat-count').innerText = state.materials;
+    document.getElementById('base-hp').innerText = Math.max(0, Math.floor(base.hp));
+    for(let i=1; i<=4; i++) {
+        document.getElementById('slot'+i).className = (state.buildMode === i ? 'slot active' : 'slot');
+    }
+}
+
+function spawnResource() {
+    if (state.isDay && resources.length < 20) {
+        resources.push({
+            x: Math.random() * WORLD_WIDTH,
+            y: GROUND_Y - 20,
+            w: 20, h: 20
+        });
+    }
+}
+
+function spawnZombie() {
+    if (!state.isDay) {
+        let side = Math.random() > 0.5 ? 0 : WORLD_WIDTH;
+        zombies.push({
+            x: side, y: GROUND_Y - 40,
+            w: 30, h: 40, vx: (side === 0 ? 2 : -2),
+            hp: 20 + (state.day * 5)
+        });
+    }
+}
+
+function update() {
+    // Timer logikk
+    state.timeLeft -= 1/60;
+    if (state.timeLeft <= 0) {
+        state.isDay = !state.isDay;
+        state.timeLeft = state.isDay ? DAY_DURATION : NIGHT_DURATION;
+        if (state.isDay) state.day++;
+        
+        const msg = document.getElementById('phase-msg');
+        msg.innerText = state.isDay ? "SAMLE MATERIALER!" : "DE FORSVAR BASEN!";
+        msg.style.color = state.isDay ? "#4ade80" : "#ff4444";
+    }
+
+    let min = Math.floor(state.timeLeft / 60);
+    let sec = Math.floor(state.timeLeft % 60);
+    document.getElementById('time-display').innerText = `Tid: ${state.isDay ? 'Dag' : 'Natt'} ${state.day} - ${min.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
+
+    // Spillerbevegelse & Fysikk
+    if (keys['KeyA'] || keys['ArrowLeft']) player.vx = -player.speed;
+    else if (keys['KeyD'] || keys['ArrowRight']) player.vx = player.speed;
+    else player.vx *= 0.8;
+
+    player.vy += 0.5; // Gravitasjon
+    player.x += player.vx;
+    player.y += player.vy;
+
+    // Bakke-kollisjon
+    if (player.y + player.h > GROUND_Y) {
+        player.y = GROUND_Y - player.h;
+        player.vy = 0;
+        player.grounded = true;
+    } else {
+        player.grounded = false;
+    }
+
+    // Wall jump sjekk (veldig enkel versjon)
+    player.onWall = false;
+    if (!player.grounded) {
+        structures.forEach(s => {
+            if (s.type === 'wall' && Math.abs(player.x - s.x) < 40 && player.y < s.y + s.h && player.y + player.h > s.y) {
+                player.onWall = true;
+                player.lastWallSide = player.x < s.x ? -1 : 1;
+            }
+        });
+    }
+
+    if ((keys['Space'] || keys['KeyW']) && player.grounded) {
+        player.vy = -player.jumpPower;
+        player.grounded = false;
+    } else if ((keys['Space'] || keys['KeyW']) && player.onWall) {
+        player.vy = -player.jumpPower;
+        player.vx = -player.lastWallSide * 10; // Skyv fra veggen
+        player.onWall = false;
+    }
+
+    // Camera
+    state.cameraX = player.x - canvas.width / 2;
+    state.cameraX = Math.max(0, Math.min(state.cameraX, WORLD_WIDTH - canvas.width));
+
+    // Ressurser
+    resources.forEach((r, i) => {
+        if (Math.abs(player.x - r.x) < 30 && Math.abs(player.y - r.y) < 50) {
+            state.materials += 10;
+            resources.splice(i, 1);
+            updateUI();
+        }
+    });
+
+    // Zombier AI
+    zombies.forEach((z, i) => {
+        let targetX = base.x + base.w/2;
+        if (Math.abs(player.x - z.x) < 300) targetX = player.x;
+
+        z.vx = z.x < targetX ? 1.5 : -1.5;
+        z.x += z.vx;
+
+        // Kollisjon med base
+        if (z.x + z.w > base.x && z.x < base.x + base.w) {
+            base.hp -= 0.1;
+            updateUI();
+        }
+
+        // Kollisjon med vegger
+        structures.forEach(s => {
+            if(s.type === 'wall' && Math.abs(z.x - s.x) < 30) {
+                s.hp -= 0.2;
+                if(s.hp <= 0) structures.splice(structures.indexOf(s), 1);
+            }
+        });
+    });
+
+    // Turrets
+    if (!state.isDay) {
+        turrets.forEach(t => {
+            let now = Date.now();
+            if (now - t.lastShot > 1000) {
+                let target = zombies.find(z => Math.hypot(z.x - t.x, z.y - t.y) < 400);
+                if (target) {
+                    projectiles.push({x: t.x, y: t.y, tx: target.x, ty: target.y, speed: 7});
+                    t.lastShot = now;
+                }
+            }
+        });
+    }
+
+    // Prosjektiler
+    projectiles.forEach((p, i) => {
+        let dx = p.tx - p.x;
+        let dy = p.ty - p.y;
+        let dist = Math.hypot(dx, dy);
+        p.x += (dx/dist) * p.speed;
+        p.y += (dy/dist) * p.speed;
+
+        zombies.forEach((z, zi) => {
+            if (Math.hypot(p.x - z.x, p.y - z.y) < 20) {
+                z.hp -= 10;
+                projectiles.splice(i, 1);
+                if(z.hp <= 0) zombies.splice(zi, 1);
+            }
+        });
+    });
+
+    if (Math.random() < 0.01) spawnResource();
+    if (!state.isDay && Math.random() < 0.02 + (state.day * 0.01)) spawnZombie();
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    
+    ctx.save();
+    ctx.translate(-state.cameraX, 0);
+
+    // Bakke
+    ctx.fillStyle = "#333";
+    ctx.fillRect(0, GROUND_Y, WORLD_WIDTH, 100);
+
+    // Base
+    ctx.fillStyle = "#00f0ff";
+    ctx.globalAlpha = 0.3;
+    ctx.fillRect(base.x, base.y, base.w, base.h);
+    ctx.globalAlpha = 1.0;
+    ctx.strokeStyle = "#00f0ff";
+    ctx.strokeRect(base.x, base.y, base.w, base.h);
+
+    // Byggverk
+    structures.forEach(s => {
+        if(s.type === 'wall') ctx.fillStyle = "#555";
+        if(s.type === 'floor') ctx.fillStyle = "#777";
+        if(s.type === 'stair') ctx.fillStyle = "#999";
+        if(s.type === 'turret') ctx.fillStyle = "#f0f";
+        
+        if(s.type === 'stair') {
+            ctx.beginPath();
+            ctx.moveTo(s.x, s.y + s.h);
+            ctx.lineTo(s.x + s.w, s.y);
+            ctx.lineTo(s.x + s.w, s.y + s.h);
+            ctx.fill();
+        } else {
+            ctx.fillRect(s.x, s.y, s.w, s.h);
+        }
+    });
+
+    // Ressurser
+    ctx.fillStyle = "#ffeb3b";
+    resources.forEach(r => ctx.fillRect(r.x, r.y, r.w, r.h));
+
+    // Zombier
+    ctx.fillStyle = "#4ade80";
+    zombies.forEach(z => ctx.fillRect(z.x, z.y, z.w, z.h));
+
+    // Prosjektiler
+    ctx.fillStyle = "white";
+    projectiles.forEach(p => ctx.beginPath() || ctx.arc(p.x, p.y, 3, 0, Math.PI*2) || ctx.fill());
+
+    // Spiller
+    ctx.fillStyle = "white";
+    ctx.fillRect(player.x, player.y, player.w, player.h);
+
+    // Natt-filter
+    if(!state.isDay) {
+        ctx.restore();
+        ctx.fillStyle = "rgba(0, 0, 50, 0.4)";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    } else {
+        ctx.restore();
+    }
+
+    if (base.hp <= 0) {
+        ctx.fillStyle = "red";
+        ctx.font = "50px Arial";
+        ctx.fillText("GAME OVER - BASEN ER ØDELAGT", canvas.width/2 - 300, canvas.height/2);
+        return;
+    }
+
+    update();
+    requestAnimationFrame(draw);
+}
+
+updateUI();
+draw();
+</script>
+</body>
+</html>
