@@ -2,43 +2,42 @@
 <html lang="no">
 <head>
     <meta charset="UTF-8">
-    <title>Zombie Survival - Sideview Base Builder</title>
+    <title>Zombie Survivor Pro</title>
     <style>
-        body { margin: 0; background: #000; color: white; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; overflow: hidden; }
-        canvas { display: block; background: #1a1a2e; }
+        body { margin: 0; background: #000; color: white; font-family: sans-serif; overflow: hidden; }
+        canvas { display: block; }
         #ui {
             position: absolute; top: 10px; left: 10px; padding: 15px;
-            background: rgba(0,0,0,0.8); border: 1px solid #444; border-radius: 8px; pointer-events: none;
+            background: rgba(0,0,0,0.8); border-radius: 8px; pointer-events: none;
+            border: 1px solid #444;
         }
         #build-instructions {
-            position: absolute; top: 10px; right: 10px; padding: 10px;
-            background: rgba(0,0,0,0.8); border: 1px solid #00f0ff; border-radius: 8px;
-            display: none; color: #00f0ff;
+            position: absolute; top: 10px; right: 10px; padding: 15px;
+            background: rgba(0,100,200,0.8); border: 2px solid #00f0ff; border-radius: 8px;
+            display: none; color: white;
         }
         #build-menu {
             position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
-            display: flex; gap: 10px; background: rgba(0,0,0,0.9); padding: 15px; border-radius: 12px;
-            border: 2px solid #555;
+            display: flex; gap: 10px; background: rgba(0,0,0,0.9); padding: 10px; border-radius: 10px;
         }
-        .slot { padding: 8px 15px; border: 2px solid #444; text-align: center; border-radius: 5px; transition: 0.2s; }
-        .active { border-color: #00f0ff; background: rgba(0, 240, 255, 0.2); box-shadow: 0 0 10px #00f0ff; }
-        .build-mode-active { border-color: #ff9800 !important; }
+        .slot { padding: 8px 15px; border: 2px solid #444; border-radius: 5px; opacity: 0.6; }
+        .active { border-color: #00f0ff; opacity: 1; background: rgba(0, 240, 255, 0.2); }
     </style>
 </head>
 <body>
 
 <div id="ui">
-    <div id="time-display" style="font-size: 1.2em; font-weight: bold;">Tid: Dag 1 - 03:00</div>
+    <div id="time-display" style="font-size: 1.2em; font-weight: bold;">Dag 1</div>
     <div style="color: #ffeb3b;">Materialer: <span id="mat-count">50</span></div>
-    <div style="color: #ff4444;">Base Helse: <span id="base-hp">500</span></div>
-    <div id="phase-msg" style="margin-top: 5px; font-weight: bold;">LET ETTER KISTER (E)!</div>
+    <div style="color: #ff4444;">Base HP: <span id="base-hp">500</span></div>
+    <div id="phase-msg">SAMLE MATERIALER</div>
 </div>
 
 <div id="build-instructions">
-    <strong>BYGGEMODUS AKTIV</strong><br>
-    - Klikk for å plassere<br>
-    - Tall 1-4 for å velge<br>
-    - Trykk S for å avslutte
+    <strong>BYGGEMODUS</strong><br>
+    - Flytt markør: WASD<br>
+    - Plasser: MELLOMROM<br>
+    - Avslutt: S
 </div>
 
 <div id="build-menu">
@@ -57,70 +56,64 @@ canvas.width = window.innerWidth;
 canvas.height = window.innerHeight;
 
 // --- KONFIGURASJON ---
-const WORLD_WIDTH = 3000;
+const WORLD_WIDTH = 5000;
 const GROUND_Y = canvas.height - 100;
-const DAY_TIME = 180; // 3 min
-const NIGHT_TIME = 90; // 1.5 min
+const DAY_TIME = 180; 
+const NIGHT_TIME = 90;
 
 let state = {
     day: 1,
     isDay: true,
     timeLeft: DAY_TIME,
-    materials: 50,
+    materials: 100,
     buildMode: 1,
     isBuilding: false,
-    cameraX: 0
+    cameraX: 0,
+    ghostX: 0,
+    ghostY: 0
 };
 
 const keys = {};
-let player = {
-    x: WORLD_WIDTH / 2, y: GROUND_Y - 60,
-    w: 30, h: 50, vx: 0, vy: 0,
-    speed: 5, jumpPower: 12,
-    grounded: false
-};
-
+let player = { x: WORLD_WIDTH / 2, y: GROUND_Y - 50, w: 30, h: 50, vx: 0, vy: 0, speed: 5, jump: 12 };
 let base = { x: WORLD_WIDTH / 2 - 60, y: GROUND_Y - 120, w: 120, h: 120, hp: 500 };
+
 let structures = [];
 let chests = [];
 let zombies = [];
 let projectiles = [];
 let turrets = [];
+let trees = [];
+let waterZones = [];
 
-// --- INPUT ---
+// Generer natur
+for(let i=0; i<25; i++) trees.push({ x: Math.random() * WORLD_WIDTH, y: GROUND_Y - 80 });
+for(let i=0; i<5; i++) waterZones.push({ x: Math.random() * WORLD_WIDTH, w: 200 + Math.random()*300 });
+
+// Input
 window.addEventListener('keydown', e => {
     keys[e.code] = true;
-    if (e.code === 'KeyS') toggleBuildMode();
+    if (e.code === 'KeyS') {
+        state.isBuilding = !state.isBuilding;
+        if(state.isBuilding) {
+            state.ghostX = Math.floor(player.x / 40) * 40;
+            state.ghostY = Math.floor(player.y / 40) * 40;
+        }
+        document.getElementById('build-instructions').style.display = state.isBuilding ? 'block' : 'none';
+    }
+    if (e.code === 'Space' && state.isBuilding) buildAtGhost();
     if (e.code === 'KeyE') tryOpenChest();
     if (e.key >= '1' && e.key <= '4') state.buildMode = parseInt(e.key);
 });
 window.addEventListener('keyup', e => keys[e.code] = false);
 
-window.addEventListener('mousedown', e => {
-    if (state.isBuilding) {
-        const worldX = e.clientX + state.cameraX;
-        const worldY = e.clientY;
-        buildAt(worldX, worldY);
-    }
-});
-
-function toggleBuildMode() {
-    state.isBuilding = !state.isBuilding;
-    document.getElementById('build-instructions').style.display = state.isBuilding ? 'block' : 'none';
-    document.getElementById('build-menu').classList.toggle('build-mode-active', state.isBuilding);
-}
-
-function buildAt(x, y) {
+function buildAtGhost() {
     let costs = [0, 10, 5, 8, 30];
     let cost = costs[state.buildMode];
     if (state.materials < cost) return;
 
-    let gx = Math.floor(x / 40) * 40;
-    let gy = Math.floor(y / 40) * 40;
     let type = ["", "wall", "floor", "stair", "turret"][state.buildMode];
-
-    structures.push({ x: gx, y: gy, w: 40, h: 40, type: type, hp: 150 });
-    if(type === 'turret') turrets.push({x: gx + 20, y: gy + 20, lastShot: 0});
+    structures.push({ x: state.ghostX, y: state.ghostY, w: 40, h: 40, type: type, hp: 15 });
+    if(type === 'turret') turrets.push({x: state.ghostX + 20, y: state.ghostY + 20, lastShot: 0});
     
     state.materials -= cost;
     updateUI();
@@ -128,161 +121,99 @@ function buildAt(x, y) {
 
 function tryOpenChest() {
     chests.forEach((c, i) => {
-        let dist = Math.hypot(player.x - c.x, player.y - c.y);
-        if (dist < 60) {
-            let gain = Math.floor(Math.random() * (25 - 10 + 1)) + 10;
-            state.materials += gain;
+        if (Math.hypot(player.x - c.x, player.y - c.y) < 60) {
+            state.materials += Math.floor(Math.random() * 16) + 10;
             chests.splice(i, 1);
             updateUI();
         }
     });
 }
 
-function spawnDayChests() {
-    chests = [];
-    let count = Math.floor(Math.random() * (8 - 5 + 1)) + 5;
-    for (let i = 0; i < count; i++) {
-        chests.push({
-            x: Math.random() * (WORLD_WIDTH - 100) + 50,
-            y: GROUND_Y - 30,
-            w: 40, h: 30
-        });
-    }
-}
-
-function createZombie(isWave = false) {
-    let side = Math.random() > 0.5 ? 0 : WORLD_WIDTH;
-    zombies.push({
-        x: side, y: GROUND_Y - 40,
-        w: 30, h: 40, vx: 0,
-        hp: 30 + (state.day * 10),
-        state: 'wander',
-        timer: 0,
-        dir: Math.random() > 0.5 ? 1 : -1
-    });
-}
-
 function update() {
-    // Tidsstyring
+    // Tid & Bakgrunnsfarge
     state.timeLeft -= 1/60;
     if (state.timeLeft <= 0) {
         state.isDay = !state.isDay;
         state.timeLeft = state.isDay ? DAY_TIME : NIGHT_TIME;
-        if (state.isDay) {
-            state.day++;
-            spawnDayChests();
-        }
-        document.getElementById('phase-msg').innerText = state.isDay ? "LET ETTER KISTER (E)!" : "FORSVAR BASEN!";
-        document.getElementById('phase-msg').style.color = state.isDay ? "#4ade80" : "#ff4444";
+        if (state.isDay) { state.day++; spawnDayChests(); }
     }
 
-    // Spillerbevegelse (kun hvis ikke i byggemodus)
-    if (!state.isBuilding) {
-        if (keys['KeyA'] || keys['ArrowLeft']) player.vx = -player.speed;
-        else if (keys['KeyD'] || keys['ArrowRight']) player.vx = player.speed;
+    // Bevegelse (Bygging vs Spiller)
+    if (state.isBuilding) {
+        if (keys['KeyA']) state.ghostX -= 40;
+        if (keys['KeyD']) state.ghostX += 40;
+        if (keys['KeyW']) state.ghostY -= 40;
+        if (keys['KeyS']) state.ghostY += 40; // Merk: Dette vil trigge S-keydown igjen hvis ikke forsiktig, men i JS keydown funker det greit
+        // Begrens ghost til verden
+        state.ghostX = Math.max(0, Math.min(state.ghostX, WORLD_WIDTH - 40));
+        keys['KeyA'] = keys['KeyD'] = keys['KeyW'] = false; // Hindre "superfart" på markør
+    } else {
+        let currentSpeed = player.speed;
+        // Sjekk vann
+        waterZones.forEach(w => {
+            if (player.x > w.x && player.x < w.x + w.w) currentSpeed = 2;
+        });
+
+        if (keys['KeyA'] || keys['ArrowLeft']) player.vx = -currentSpeed;
+        else if (keys['KeyD'] || keys['ArrowRight']) player.vx = currentSpeed;
         else player.vx *= 0.8;
 
-        player.vy += 0.6; // Gravitasjon
+        player.vy += 0.6;
         player.x += player.vx;
         player.y += player.vy;
-
-        // Wall Jump Logikk
-        let touchingWall = false;
-        let wallDir = 0;
-        structures.forEach(s => {
-            if (s.type === 'wall' && Math.abs(player.y - s.y) < 40) {
-                if (player.x + player.w > s.x && player.x < s.x + s.w) {
-                   // kollisjonshåndtering her om ønskelig
-                }
-            }
-        });
 
         if (player.y + player.h > GROUND_Y) {
             player.y = GROUND_Y - player.h;
             player.vy = 0;
-            player.grounded = true;
-        } else {
-            player.grounded = false;
         }
-
-        if ((keys['Space'] || keys['KeyW']) && player.grounded) {
-            player.vy = -player.jumpPower;
-            player.grounded = false;
-        }
-    } else {
-        player.vx = 0; // Stopp helt i byggemodus
+        if ((keys['KeyW'] || keys['Space']) && player.y >= GROUND_Y - player.h) player.vy = -player.jump;
     }
 
     // Kamera
     state.cameraX = player.x - canvas.width / 2;
     state.cameraX = Math.max(0, Math.min(state.cameraX, WORLD_WIDTH - canvas.width));
 
-    // Zombie AI
-    if (state.isDay && zombies.length < 3) createZombie();
+    // Zombie wave kontroll
+    let maxZombies = state.isDay ? 3 : (state.day === 1 ? 3 : 5 + state.day * 2);
+    if (zombies.length < maxZombies && Math.random() < 0.02) spawnZombie();
 
     zombies.forEach((z, i) => {
-        let distToPlayer = Math.hypot(player.x - z.x, player.y - z.y);
-
-        if (!state.isDay) {
-            // Natt: Angrip base
-            let targetX = base.x + base.w/2;
-            z.vx = z.x < targetX ? 2 : -2;
-            
-            if (z.x + z.w > base.x && z.x < base.x + base.w) {
-                base.hp -= 0.1;
-                updateUI();
-            }
+        if (!state.isDay || Math.hypot(player.x - z.x, player.y - z.y) < 250) {
+            let target = (!state.isDay) ? base.x + 60 : player.x;
+            z.x += z.x < target ? 1.5 : -1.5;
         } else {
-            // Dag: Vandring eller jag spiller
-            if (distToPlayer < 200) {
-                z.vx = z.x < player.x ? 2.5 : -2.5;
-            } else {
-                z.timer--;
-                if (z.timer <= 0) {
-                    z.dir = Math.random() > 0.5 ? 1 : -1;
-                    z.timer = 60 + Math.random() * 120;
-                }
-                z.vx = z.dir * 0.8;
-            }
-        }
-        
-        z.x += z.vx;
-
-        // Zombie skader spiller
-        if (distToPlayer < 30) {
-            // Enkel feedback her kunne vært helsetap for spiller
+            // Vandring
+            z.x += Math.sin(Date.now()/1000) * 0.5;
         }
 
-        // Kollisjon med vegger for zombier
-        structures.forEach(s => {
-            if (s.type === 'wall' && Math.abs(z.x - s.x) < 20) {
-                if (!state.isDay) s.hp -= 0.5; // Zombier spiser vegger om natta
-                else z.dir *= -1; // Snur om dagen
+        // Skade base eller vegger
+        structures.forEach((s, si) => {
+            if (s.type === 'wall' && Math.abs(z.x - s.x) < 25) {
+                s.hp -= 0.05;
+                if(s.hp <= 0) structures.splice(si, 1);
             }
         });
+        if (z.x > base.x && z.x < base.x + base.w) base.hp -= 0.1;
     });
 
-    // Turrets & Prosjektiler (samme som før)
-    if (!state.isDay) {
-        turrets.forEach(t => {
-            let now = Date.now();
-            if (now - t.lastShot > 800) {
-                let target = zombies.find(z => Math.hypot(z.x - t.x, z.y - t.y) < 500);
-                if (target) {
-                    projectiles.push({x: t.x, y: t.y, tx: target.x, ty: target.y, speed: 10});
-                    t.lastShot = now;
-                }
+    // Turrets
+    turrets.forEach(t => {
+        if(Date.now() - t.lastShot > 1000) {
+            let target = zombies.find(z => Math.hypot(z.x - t.x, z.y - t.y) < 400);
+            if(target) {
+                projectiles.push({x: t.x, y: t.y, tx: target.x, ty: target.y});
+                t.lastShot = Date.now();
             }
-        });
-    }
+        }
+    });
 
     projectiles.forEach((p, i) => {
-        let dx = p.tx - p.x; let dy = p.ty - p.y;
-        let d = Math.hypot(dx, dy);
-        p.x += (dx/d) * p.speed; p.y += (dy/d) * p.speed;
+        let angle = Math.atan2(p.ty - p.y, p.tx - p.x);
+        p.x += Math.cos(angle) * 10;
+        p.y += Math.sin(angle) * 10;
         zombies.forEach((z, zi) => {
-            if (Math.hypot(p.x - z.x, p.y - z.y) < 30) {
-                z.hp -= 15;
+            if(Math.hypot(p.x - z.x, p.y - z.y) < 30) {
+                z.hp -= 10;
                 projectiles.splice(i, 1);
                 if(z.hp <= 0) zombies.splice(zi, 1);
             }
@@ -290,28 +221,47 @@ function update() {
     });
 }
 
+function spawnZombie() {
+    let side = Math.random() > 0.5 ? 0 : WORLD_WIDTH;
+    zombies.push({ x: side, y: GROUND_Y - 40, w: 30, h: 40, hp: 20 + state.day*5 });
+}
+
+function spawnDayChests() {
+    chests = [];
+    for(let i=0; i<Math.floor(Math.random()*4)+5; i++) {
+        chests.push({ x: Math.random()*WORLD_WIDTH, y: GROUND_Y - 30, w: 40, h: 30 });
+    }
+}
+
 function draw() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    // Bakgrunnsfarge (Himmel)
+    ctx.fillStyle = state.isDay ? '#87CEEB' : '#0a0a2e';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
     ctx.save();
     ctx.translate(-state.cameraX, 0);
 
-    // Miljø
-    ctx.fillStyle = "#222";
-    ctx.fillRect(0, GROUND_Y, WORLD_WIDTH, 100);
+    // Vann
+    ctx.fillStyle = '#4488ff';
+    waterZones.forEach(w => ctx.fillRect(w.x, GROUND_Y, w.w, 100));
+
+    // Bakke
+    ctx.fillStyle = '#3d2b1f';
+    ctx.fillRect(0, GROUND_Y + 10, WORLD_WIDTH, 90);
+
+    // Trær
+    trees.forEach(t => {
+        ctx.fillStyle = '#4b3621'; ctx.fillRect(t.x, t.y, 20, 80);
+        ctx.fillStyle = '#2d5a27'; ctx.beginPath(); ctx.arc(t.x+10, t.y, 40, 0, Math.PI*2); ctx.fill();
+    });
 
     // Base
-    ctx.fillStyle = "rgba(0, 240, 255, 0.2)";
-    ctx.fillRect(base.x, base.y, base.w, base.h);
-    ctx.strokeStyle = "#00f0ff";
-    ctx.strokeRect(base.x, base.y, base.w, base.h);
+    ctx.fillStyle = 'rgba(255,255,255,0.1)'; ctx.fillRect(base.x, base.y, base.w, base.h);
+    ctx.strokeStyle = '#00f0ff'; ctx.strokeRect(base.x, base.y, base.w, base.h);
 
     // Kister
-    ctx.fillStyle = "#8d6e63";
-    chests.forEach(c => {
-        ctx.fillRect(c.x, c.y, c.w, c.h);
-        ctx.strokeStyle = "#ffeb3b";
-        ctx.strokeRect(c.x, c.y, c.w, c.h);
-    });
+    ctx.fillStyle = '#8b4513';
+    chests.forEach(c => ctx.fillRect(c.x, c.y, c.w, c.h));
 
     // Byggverk
     structures.forEach(s => {
@@ -321,44 +271,42 @@ function draw() {
         } else ctx.fillRect(s.x, s.y, s.w, s.h);
     });
 
-    // Zombier
-    zombies.forEach(z => {
-        ctx.fillStyle = state.isDay ? "#4ade80" : "#ff4444";
-        ctx.fillRect(z.x, z.y, z.w, z.h);
-    });
+    // Ghost Cursor
+    if (state.isBuilding) {
+        ctx.fillStyle = 'rgba(0, 240, 255, 0.4)';
+        ctx.fillRect(state.ghostX, state.ghostY, 40, 40);
+    }
 
-    // Prosjektiler
-    ctx.fillStyle = "yellow";
-    projectiles.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 4, 0, Math.PI*2); ctx.fill(); });
+    // Zombier
+    ctx.fillStyle = '#4ade80';
+    zombies.forEach(z => ctx.fillRect(z.x, z.y, z.w, z.h));
 
     // Spiller
-    ctx.fillStyle = state.isBuilding ? "#ff9800" : "white";
+    ctx.fillStyle = '#fff';
     ctx.fillRect(player.x, player.y, player.w, player.h);
 
     ctx.restore();
 
-    // UI-oppdatering tid
-    let min = Math.floor(state.timeLeft / 60);
-    let sec = Math.floor(state.timeLeft % 60);
-    document.getElementById('time-display').innerText = `Tid: ${state.isDay ? 'Dag' : 'Natt'} ${state.day} - ${min}:${sec.toString().padStart(2, '0')}`;
-
-    if (base.hp > 0) {
+    updateUI();
+    if(base.hp > 0) {
         update();
         requestAnimationFrame(draw);
     } else {
-        ctx.fillStyle = "red"; ctx.font = "bold 40px Arial";
-        ctx.fillText("BASEN BLE OVERRENT! GAME OVER", canvas.width/2 - 300, canvas.height/2);
+        ctx.fillStyle = 'red'; ctx.font = '50px Arial'; ctx.fillText("BASE ØDELAGT!", canvas.width/2-200, canvas.height/2);
     }
 }
 
 function updateUI() {
+    let min = Math.floor(state.timeLeft/60);
+    let sec = Math.floor(state.timeLeft%60);
+    document.getElementById('time-display').innerText = `Dag ${state.day} - ${min}:${sec.toString().padStart(2,'0')}`;
     document.getElementById('mat-count').innerText = state.materials;
     document.getElementById('base-hp').innerText = Math.floor(base.hp);
+    document.getElementById('phase-msg').innerText = state.isDay ? "SAMLE MATERIALER (E)" : "FORSVAR BASEN!";
     for(let i=1; i<=4; i++) document.getElementById('slot'+i).className = (state.buildMode === i ? 'slot active' : 'slot');
 }
 
 spawnDayChests();
-updateUI();
 draw();
 </script>
 </body>
